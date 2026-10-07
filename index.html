@@ -108,6 +108,8 @@ import { collection, getDocs, getDoc, doc, addDoc, setDoc, updateDoc, deleteDoc,
 import { ref as sref, uploadBytes, getDownloadURL, deleteObject } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-storage.js";
 
 const OWNER_EMAIL = "hasymila@gmail.com";
+const VAPID_KEY = "BEXmjjhAabrbxGI8of2wyKWWXyBc-zbl60ixv0RdKNeykQlyJAoUAxZ9-5YUs8A8zh1NrHB5eoIlZjG51eFITeg";
+let me = "";
 const auth = getAuth(app);
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -209,7 +211,7 @@ $('backBtn').onclick = () => { if(formDriver){ formDriver = null; } else if(show
 onAuthStateChanged(auth, async user => {
   ['loginView','appView','denied'].forEach(i => $(i).classList.add('hide'));
   if(!user){ $('loginView').classList.remove('hide'); return; }
-  const email = (user.email||'').toLowerCase();
+  const email = (user.email||'').toLowerCase(); me = email;
   let role = null;
   if(email === OWNER_EMAIL) role = 'direction';
   else { try { const s = await getDoc(doc(db,'fleetStaff',email)); if(s.exists()) role = s.data().role || 'staff'; } catch(e){} }
@@ -267,8 +269,43 @@ function renderDash(){
   if(!D.vehicles.length) h += '<div class="card muted">Aucun véhicule pour l\'instant. Va dans « Véhicules » puis « + Véhicule ».</div>';
   else if(!al.length) h += '<div class="card" style="color:var(--ok)">✔ Tout est en règle, aucune alerte.</div>';
   else h += al.map((a,i) => `<div class="alert ${a.lvl===0?'a-bad':'a-warn'}" data-i="${i}"><span class="dot"></span><div><b>${esc(a.who)}</b><div class="muted" style="color:var(--text)">${esc(a.text)}</div></div></div>`).join('');
+  h += `<div class="card" style="margin-top:14px"><h3>🔔 Alertes sur ton téléphone</h3>
+    <p class="muted" id="np-status"></p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="pri small" id="np-on">Activer les notifications</button><button class="small" id="np-test">Envoyer un test (email + notification)</button></div>
+    <div id="np-msg" class="err" style="color:var(--muted)"></div>
+    <p class="muted" style="margin-top:8px">Chaque matin à 7h tu reçois aussi un email avec les alertes du jour, et tout de suite quand un incident est enregistré.</p></div>`;
   $('main').innerHTML = h;
   document.querySelectorAll('.alert').forEach(el => el.onclick = () => { const a = al[el.dataset.i]; if(a.drv){ view='drv'; render(); } else openVehicle(a.vehId); });
+  initNotifCard();
+}
+function initNotifCard(){
+  const st = $('np-status'), msg = $('np-msg'); if(!st) return;
+  const supported = 'Notification' in window && 'serviceWorker' in navigator && 'PushManager' in window;
+  const iosBrowser = /iphone|ipad/i.test(navigator.userAgent) && !window.navigator.standalone;
+  let on = false; try { on = Notification.permission === 'granted' && !!localStorage.getItem('fleetPush:' + me); } catch(e){}
+  st.textContent = !supported ? (iosBrowser ? 'Sur iPhone : ouvre d\'abord le site dans Safari, appuie sur Partager puis « Sur l\'écran d\'accueil », et ouvre l\'appli depuis son icône.' : 'Ce navigateur ne gère pas les notifications.')
+    : on ? '✔ Notifications activées sur cet appareil.' : 'Non activées sur cet appareil.';
+  $('np-on').classList.toggle('hide', on || !supported);
+  $('np-on').onclick = async () => {
+    msg.style.color = 'var(--muted)'; msg.textContent = 'Activation…';
+    try {
+      const perm = await Notification.requestPermission();
+      if(perm !== 'granted') throw new Error('Permission refusée : autorise les notifications pour ce site dans les réglages.');
+      const reg = await navigator.serviceWorker.ready;
+      const mod = await import('https://www.gstatic.com/firebasejs/12.2.1/firebase-messaging.js');
+      const token = await mod.getToken(mod.getMessaging(app), { vapidKey: VAPID_KEY, serviceWorkerRegistration: reg });
+      if(!token) throw new Error('Aucun jeton reçu.');
+      await setDoc(doc(db,'fleetDeviceTokens',token), {email:me, userAgent:navigator.userAgent.slice(0,180), updatedAt:serverTimestamp()});
+      try { localStorage.setItem('fleetPush:' + me, '1'); } catch(e){}
+      initNotifCard(); $('np-msg').style.color = 'var(--ok)'; $('np-msg').textContent = '✔ Activé. Clique sur « Envoyer un test » pour vérifier.';
+    } catch(e){ msg.style.color = 'var(--bad)'; msg.textContent = 'Erreur : ' + (e.message || e); }
+  };
+  $('np-test').onclick = async () => {
+    msg.style.color = 'var(--muted)';
+    try { await addDoc(collection(db,'fleetNotifRequests'), {email:me, createdAt:serverTimestamp()});
+      msg.textContent = 'Test demandé : tu dois recevoir un email et une notification dans quelques secondes (vérifie aussi les spams).'; }
+    catch(e){ msg.style.color = 'var(--bad)'; msg.textContent = 'Erreur : ' + (e.message || e); }
+  };
 }
 
 /* ---------- liste des véhicules ---------- */
