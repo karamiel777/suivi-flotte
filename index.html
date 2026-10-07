@@ -115,8 +115,15 @@ onAuthStateChanged(auth, async user => {
   $('who').textContent = (isDirector ? 'Direction' : 'Équipe') + ' · ' + email;
   $('appView').classList.remove('hide');
   currentId = null; showForm = false;
-  await loadVehicles(); render();
+  try { await loadVehicles(); render(); }
+  catch(e){ showFatal(e); }
 });
+function showFatal(e){
+  const denied = e && (e.code === 'permission-denied' || /permission/i.test(e.message||''));
+  $('main').innerHTML = '<div class="card"><h3>Impossible de charger les données</h3><p class="muted">' +
+    (denied ? 'Firebase refuse l\'accès : les règles Firestore du suivi de flotte ne sont pas encore publiées (ou la page Règles n\'a pas été publiée). Ajoute les règles du fichier regles-firestore.txt, clique sur « Publier », puis recharge cette page.'
+            : 'Erreur : ' + esc(e && (e.message||e.code) || e)) + '</p><button class="pri" onclick="location.reload()">Recharger</button></div>';
+}
 
 async function loadVehicles(){
   const s = await getDocs(collection(db,'fleetVehicles'));
@@ -172,7 +179,7 @@ function renderList(){
   if($('teamBtn')) $('teamBtn').onclick = renderTeam;
   document.querySelectorAll('.veh').forEach(el => el.onclick = async () => {
     currentId = el.dataset.id; tab = 'km'; $('main').innerHTML = '<p class="muted">Chargement…</p>';
-    await loadVehicleData(currentId); render();
+    try { await loadVehicleData(currentId); render(); } catch(e){ showFatal(e); }
   });
 }
 
