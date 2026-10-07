@@ -1,0 +1,20 @@
+// À AJOUTER dans Firestore > Règles, JUSTE AVANT les deux dernières accolades "}  }" de la fin.
+// (ne supprime rien de ce qui existe déjà)
+
+    function fleetOwner() {
+      return request.auth != null && request.auth.token.email == 'hasymila@gmail.com';
+    }
+    function fleetMember() {
+      return fleetOwner() || (request.auth != null &&
+        exists(/databases/$(database)/documents/fleetStaff/$(request.auth.token.email)));
+    }
+
+    match /fleetVehicles/{id}     { allow read, write: if fleetMember(); }
+    match /fleetKmLogs/{id}       { allow read, write: if fleetMember(); }
+    match /fleetFuel/{id}         { allow read, write: if fleetMember(); }
+    match /fleetMaintenance/{id}  { allow read, write: if fleetMember(); }
+    match /fleetInsurances/{id}   { allow read, write: if fleetMember(); }
+    match /fleetStaff/{email} {
+      allow read: if request.auth != null && (fleetOwner() || request.auth.token.email == email);
+      allow write: if fleetOwner();
+    }
